@@ -1,0 +1,63 @@
+name: Release PingScanGui
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build PingScanGui.exe
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE 'PingScanGui.cpp'
+          $outDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $exe = Join-Path $outDir 'PingScanGui.exe'
+
+          & cl.exe /nologo /EHsc /O2 /std:c++17 /utf-8 /DUNICODE /D_UNICODE "/Fe:$exe" "$source" /link /SUBSYSTEM:WINDOWS
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "cl.exe failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path $exe)) {
+            throw "Build succeeded but $exe was not found"
+          }
+          Get-Item $exe | Select-Object FullName, Length
+
+      - name: Generate SHA256 checksum
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'artifacts/PingScanGui.exe'
+          $checksum = Join-Path $env:GITHUB_WORKSPACE 'artifacts/PingScanGui.exe.sha256'
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $exe).Hash
+          "$hash  PingScanGui.exe" | Out-File -FilePath $checksum -Encoding ascii
+          Get-Content $checksum
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/PingScanGui.exe
+            artifacts/PingScanGui.exe.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Automated MSVC x64 build of `PingScanGui.exe` from `PingScanGui.cpp`.
+
+            Requires Windows 11 / Windows 10 x64. No extra runtime dependencies.
+            SHA256 checksum is included for verification.
